@@ -17,6 +17,8 @@ import numpy as np
 from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
 import langchain
+from dotenv import load_dotenv
+
 langchain.verbose = True
 load_dotenv()
 

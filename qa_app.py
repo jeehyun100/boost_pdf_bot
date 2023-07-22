@@ -199,11 +199,14 @@ def main():
         )
     
     st.sidebar.title("Menu")
+    f_df = fdr.StockListing('KRX')
+    #f_df[f_df['Name'].isin['삼성전자','LG전자']]
+    dict_stock = f_df[f_df['Name'].isin(['LG전자','삼성전자'])][['Code','Name']].to_records()
     
         # Sidebar options
     ticker = st.sidebar.selectbox(
-        'Ticker to Plot', 
-        options = ['TSLA', 'MSFT', 'AAPL']
+        'Stock Name', 
+        options = list(dict_stock['Name'])
     )
 
     days_to_plot = st.sidebar.slider(
@@ -253,8 +256,8 @@ def main():
     else:
         os.environ["OPENAI_API_KEY"] = st.session_state.openai_api_key
 
-    uploaded_files = st.file_uploader("Upload a PDF or TXT Document", type=[
-                                      "pdf", "txt"], accept_multiple_files=True)
+    # uploaded_files = st.file_uploader("Upload a PDF or TXT Document", type=[
+    #                                   "pdf", "txt"], accept_multiple_files=True)
     
     # Embed using OpenAI embeddings
     # Embed using OpenAI embeddings or HuggingFace embeddings
@@ -331,9 +334,11 @@ def main():
         if user_question:
             answer = qa.run(user_question)
             st.write("Answer:", answer)
-            
+        
+        ticker_c = dict_stock[dict_stock['Name'] == f'{ticker}']['Code'][0]
+        
         # Get the dataframe and add the moving averages
-        df = fdr.DataReader(f'{ticker}','2020')
+        df = fdr.DataReader(f'{ticker_c}','2023')
 
         #df = pd.read_csv(f'{ticker}.csv')
         df[f'{ma1}_ma'] = df['Close'].rolling(ma1).mean()
