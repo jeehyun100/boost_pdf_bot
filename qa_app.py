@@ -14,9 +14,21 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.callbacks.base import CallbackManager
 from langchain.embeddings import HuggingFaceEmbeddings
+from dotenv import load_dotenv
+from chromadb.config import Settings
+import chromadb
+from langchain.vectorstores import Chroma
+import langchain
+from draw_candlestick_complex import get_candlestick_plot
+import pandas as pd
+langchain.verbose = True
+import FinanceDataReader as fdr
+df_krx = fdr.StockListing('KRX')
 
 
-st.set_page_config(page_title="PDF Analyzer",page_icon=':shark:')
+
+
+st.set_page_config(page_title="Stock Analyzer",page_icon=':shark:')
 
 @st.cache_data
 def load_docs(files):
@@ -39,6 +51,9 @@ def load_docs(files):
     return all_text
 
 
+def conn_chromadb(chroma_setting, my_collection, embeddings):
+    chroma_db = Chroma(client_settings=chroma_setting, collection_name=my_collection, embedding_function = embeddings)
+    return chroma_db
 
 
 @st.cache_resource
@@ -102,7 +117,7 @@ def generate_eval(text, N, chunk):
 # ...
 
 def main():
-    
+    load_dotenv()
     foot = f"""
     <div style="
         position: fixed;
@@ -113,7 +128,7 @@ def main():
         padding: 0px 0px;
         text-align: center;
     ">
-        <p>Made by <a href='https://twitter.com/mehmet_ba7'>Mehmet Balioglu</a></p>
+        <p>Made by <a href='https://twitter.com/mehmet_ba7'>Mehmet Balioglu</a> Modifed bi JH</p>
     </div>
     """
 
@@ -176,19 +191,42 @@ def main():
     st.write(
     f"""
     <div style="display: flex; align-items: center; margin-left: 0;">
-        <h1 style="display: inline-block;">PDF Analyzer</h1>
+        <h1 style="display: inline-block;">Stock Analyzer</h1>
         <sup style="margin-left:5px;font-size:small; color: green;">beta</sup>
     </div>
     """,
     unsafe_allow_html=True,
         )
     
-    
-
-
-    
-    
     st.sidebar.title("Menu")
+    
+        # Sidebar options
+    ticker = st.sidebar.selectbox(
+        'Ticker to Plot', 
+        options = ['TSLA', 'MSFT', 'AAPL']
+    )
+
+    days_to_plot = st.sidebar.slider(
+        'Days to Plot', 
+        min_value = 1,
+        max_value = 300,
+        value = 120,
+    )
+    ma1 = st.sidebar.number_input(
+        'Moving Average #1 Length',
+        value = 10,
+        min_value = 1,
+        max_value = 120,
+        step = 1,    
+    )
+    ma2 = st.sidebar.number_input(
+        'Moving Average #2 Length',
+        value = 20,
+        min_value = 1,
+        max_value = 120,
+        step = 1,    
+    )
+    
     
     embedding_option = st.sidebar.radio(
         "Choose Embeddings", ["OpenAI Embeddings", "HuggingFace Embeddings(slower)"])
@@ -199,7 +237,8 @@ def main():
 
     # Use RecursiveCharacterTextSplitter as the default and only text splitter
     splitter_type = "RecursiveCharacterTextSplitter"
-
+    #breakpoint()
+    st.session_state.openai_api_key = os.environ.get('OPEN_API_KEY')
     if 'openai_api_key' not in st.session_state:
         openai_api_key = st.text_input(
             'Please enter your OpenAI API key or [get one here](https://platform.openai.com/account/api-keys)', value="", placeholder="Enter the OpenAI API key which begins with sk-")
@@ -216,51 +255,59 @@ def main():
 
     uploaded_files = st.file_uploader("Upload a PDF or TXT Document", type=[
                                       "pdf", "txt"], accept_multiple_files=True)
+    
+    # Embed using OpenAI embeddings
+    # Embed using OpenAI embeddings or HuggingFace embeddings
+    if embedding_option == "OpenAI Embeddings":
+        embeddings = OpenAIEmbeddings()
+    elif embedding_option == "HuggingFace Embeddings(slower)":
+        # Replace "bert-base-uncased" with the desired HuggingFace model
+        embeddings = HuggingFaceEmbeddings()
+    
+    
+    chroma_setting =  Settings(
+        chroma_api_impl="rest",
+        chroma_server_host="172.19.0.1",
+        chroma_server_http_port="8000",
+    )
+    my_collection = "test4"
 
-    if uploaded_files:
-        # Check if last_uploaded_files is not in session_state or if uploaded_files are different from last_uploaded_files
-        if 'last_uploaded_files' not in st.session_state or st.session_state.last_uploaded_files != uploaded_files:
-            st.session_state.last_uploaded_files = uploaded_files
-            if 'eval_set' in st.session_state:
-                del st.session_state['eval_set']
-
-        # Load and process the uploaded PDF or TXT files.
-        loaded_text = load_docs(uploaded_files)
-        st.write("Documents uploaded and processed.")
-
-        # Split the document into chunks
-        splits = split_texts(loaded_text, chunk_size=1000,
-                             overlap=0, split_method=splitter_type)
-
-        # Display the number of text chunks
-        num_chunks = len(splits)
-        st.write(f"Number of text chunks: {num_chunks}")
-
-        # Embed using OpenAI embeddings
-            # Embed using OpenAI embeddings or HuggingFace embeddings
-        if embedding_option == "OpenAI Embeddings":
-            embeddings = OpenAIEmbeddings()
-        elif embedding_option == "HuggingFace Embeddings(slower)":
-            # Replace "bert-base-uncased" with the desired HuggingFace model
-            embeddings = HuggingFaceEmbeddings()
-
-        retriever = create_retriever(embeddings, splits, retriever_type)
-
-
+    chroma_db =  conn_chromadb(chroma_setting, my_collection, embeddings)
+    
+    if chroma_db:
+        print("connect db")
+        
+        
         # Initialize the RetrievalQA chain with streaming output
         callback_handler = StreamingStdOutCallbackHandler()
         callback_manager = CallbackManager([callback_handler])
+        
+        p_search_kwargs = {"filter" : {"stock_name" : "삼성전자"}}
+        #query = "What is the 영업이익 of 삼성전자?"
+        #k = 2
 
         chat_openai = ChatOpenAI(
             streaming=True, callback_manager=callback_manager, verbose=True, temperature=0)
-        qa = RetrievalQA.from_chain_type(llm=chat_openai, retriever=retriever, chain_type="stuff", verbose=True)
 
+        #retriever = chroma_db.as_retriever(k=2, verbose=True)
+        retriever = chroma_db.as_retriever(k=2, search_kwargs = p_search_kwargs)
+        qa = RetrievalQA.from_chain_type(llm=chat_openai, retriever=retriever, chain_type="stuff", verbose=True)
+        
+        c_client = chromadb.Client(chroma_setting)
+        collection = c_client.get_or_create_collection(name=my_collection)
+
+        p_where_kwargs = {"doc_id" : "103008"}
+        text2 = collection.get(where = p_where_kwargs)
+        docs_text = text2['documents']
+        all_text = ' '.join(docs_text)
+        
+        #loaded_text = chroma_db.get
         # Check if there are no generated question-answer pairs in the session state
         if 'eval_set' not in st.session_state:
             # Use the generate_eval function to generate question-answer pairs
-            num_eval_questions = 10  # Number of question-answer pairs to generate
+            num_eval_questions = 3  # Number of question-answer pairs to generate
             st.session_state.eval_set = generate_eval(
-                loaded_text, num_eval_questions, 3000)
+                all_text, num_eval_questions, 3000)
 
        # Display the question-answer pairs in the sidebar with smaller text
         for i, qa_pair in enumerate(st.session_state.eval_set):
@@ -277,12 +324,28 @@ def main():
             # <h4 style="font-size: 14px;">Question {i + 1}:</h4>
             # <h4 style="font-size: 14px;">Answer {i + 1}:</h4>
         st.write("Ready to answer questions.")
-
+        
+        
         # Question and answering
         user_question = st.text_input("Enter your question:")
         if user_question:
             answer = qa.run(user_question)
             st.write("Answer:", answer)
+            
+        # Get the dataframe and add the moving averages
+        df = fdr.DataReader(f'{ticker}','2020')
+
+        #df = pd.read_csv(f'{ticker}.csv')
+        df[f'{ma1}_ma'] = df['Close'].rolling(ma1).mean()
+        df[f'{ma2}_ma'] = df['Close'].rolling(ma2).mean()
+        df = df[-days_to_plot:]
+
+        # Display the plotly chart on the dashboard
+        st.plotly_chart(
+            get_candlestick_plot(df, ma1, ma2, ticker),
+            use_container_width = True,
+        )
+                
 
 
 if __name__ == "__main__":
