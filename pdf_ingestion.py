@@ -18,9 +18,9 @@ from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
 import langchain
 langchain.verbose = True
+load_dotenv()
 
-
-OPEN_API_KEY = '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'
+OPEN_API_KEY = os.environ.get('OPEN_API_KEY')
 embeddings = OpenAIEmbeddings(openai_api_key=OPEN_API_KEY)
 
 chunk_size = 1000
